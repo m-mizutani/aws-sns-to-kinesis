@@ -1,0 +1,78 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "AlertResponder https://github.com/m-mizutani/AlertResponder"
+Transform: AWS::Serverless-2016-10-31
+Parameters:
+  SnsTopicArn:
+    Type: String
+
+  KinesisStreamArn:
+    Type: String
+
+  LambdaRoleArn:
+    Type: String
+    Default: ""
+
+  LogLevel:
+    Type: String
+    Default: "INFO"
+
+Conditions:
+  LambdaRoleRequired:
+    Fn::Equals: [ { Ref: LambdaRoleArn }, "" ]
+
+Resources:
+  # --------------------------------------------------------
+  # Lambda Function
+  Forwarder:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: build
+      Handler: main
+      Role:
+        Fn::If: [ LambdaRoleRequired, {"Fn::GetAtt": LoaderLambdaRole.Arn}, {Ref: LambdaRoleArn} ]
+      Runtime: go1.x
+      CodeUri: build
+      Timeout: 300
+      MemorySize: 128
+      ReservedConcurrentExecutions: 1
+      Environment:
+        Variables:
+          DST_STREAM:
+            Ref: KinesisStreamArn
+          LOG_LEVEL:
+            Ref: LogLevel
+      Events:
+        NotifyTopic:
+          Type: SNS
+          Properties:
+            Topic:
+              Ref: SnsTopicArn
+
+
+  # --------------------------------------------------------
+  # IAM Roles
+  LoaderLambdaRole:
+    Type: AWS::IAM::Role
+    Condition: LambdaRoleRequired
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: ["lambda.amazonaws.com"]
+            Action: ["sts:AssumeRole"]
+      Path: "/"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyName: "AlertResponderLambdaReviewer"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - kinesis:PutRecord
+                  - kinesis:PutRecords
+                Resource:
+                  Ref: KinesisStreamArn
